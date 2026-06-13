@@ -19,6 +19,9 @@ export type StoredCrawl = {
   createdAt: number;
   maxConcurrency?: number;
   zeroDataRetention?: boolean;
+  // which queue backend this crawl's group + jobs live on; a crawl never
+  // spans backends. Absent on crawls created before the FDB rollout (= pg).
+  queueBackend?: "pg" | "fdb";
 };
 
 export async function saveCrawl(id: string, crawl: StoredCrawl) {
@@ -204,6 +207,24 @@ export async function getDoneJobsOrdered(
     start,
     end,
   );
+}
+
+export async function getLastDoneJobTimestamp(
+  id: string,
+): Promise<number | null> {
+  await redisEvictConnection.expire(
+    "crawl:" + id + ":jobs_donez_ordered",
+    24 * 60 * 60,
+  );
+  const result = await redisEvictConnection.zrange(
+    "crawl:" + id + ":jobs_donez_ordered",
+    -1,
+    -1,
+    "WITHSCORES",
+  );
+  if (!result || result.length < 2) return null;
+  const score = parseInt(result[1], 10);
+  return Number.isFinite(score) ? score : null;
 }
 
 export async function getDoneJobsOrderedUntil(
